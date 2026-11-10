@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SkyAssist - AI Airline Assistant</title>
+<style>
+:root{--navy:#0b1f4b;--blue:#1d6fe8;--sky:#e8f1ff;--ink:#16213a;--mute:#66728c;--line:#dde5f3;--ok:#14a05f;--bad:#d64545;--bg:#f5f8fe}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+header{background:var(--navy);color:#fff;display:flex;align-items:center;justify-content:space-between;padding:0 28px;height:62px;position:sticky;top:0;z-index:5}
+.logo{font-size:22px;font-weight:700;cursor:pointer}.logo b{color:#6fb0ff}
+nav a{color:#c9d8f5;margin-left:22px;cursor:pointer;font-size:15px;padding:6px 2px;border-bottom:2px solid transparent}
+nav a:hover,nav a.on{color:#fff;border-color:#6fb0ff}
+main{max-width:980px;margin:0 auto;padding:24px 18px 60px}
+.view{display:none}.view.on{display:block}
+.hero{background:linear-gradient(135deg,#0b1f4b,#1d6fe8);color:#fff;border-radius:18px;padding:44px 36px 36px}
+.hero h1{margin:0 0 8px;font-size:34px}.hero p{margin:0 0 24px;color:#d7e5ff;font-size:17px}
+.card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:0 2px 8px rgba(20,40,90,.05)}
+form.search{background:#fff;border-radius:14px;padding:16px;display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;color:var(--ink)}
+label{font-size:12px;color:var(--mute);display:block;margin-bottom:4px;font-weight:600}
+input,select{width:100%;padding:10px 11px;border:1px solid var(--line);border-radius:9px;font-size:15px;background:#fff;color:var(--ink)}
+input:focus{outline:2px solid #9cc2ff}
+button{font:inherit;cursor:pointer;border:0;border-radius:10px;padding:11px 18px;font-weight:600;background:var(--blue);color:#fff}
+button:hover{filter:brightness(1.08)}button.ghost{background:var(--sky);color:var(--blue)}
+button.danger{background:var(--bad)}button.ok{background:var(--ok)}button:disabled{opacity:.5;cursor:default}
+.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}.sp{flex:1}
+h2{margin:6px 0 16px}.mute{color:var(--mute);font-size:14px}
+.feats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-top:22px}
+.feats .card b{display:block;margin-bottom:4px}
+.flight{display:flex;align-items:center;gap:18px;margin-bottom:12px;flex-wrap:wrap}
+.flight .air{min-width:120px}.flight .air b{display:block}
+.flight .t{font-size:20px;font-weight:700}.flight .path{flex:1;min-width:210px;display:flex;align-items:center;gap:10px;text-align:center}
+.flight .line{flex:1;border-top:2px dashed #b9c8e6;position:relative;top:-2px}
+.flight .price{font-size:22px;font-weight:700;color:var(--navy);text-align:right}
+.tag{display:inline-block;font-size:12px;border-radius:99px;padding:2px 9px;background:var(--sky);color:var(--blue);font-weight:600}
+.tag.low{background:#fff0e0;color:#c26a00}.tag.ok{background:#e1f6ec;color:var(--ok)}.tag.bad{background:#fde8e8;color:var(--bad)}
+.err{background:#fde8e8;color:var(--bad);padding:10px 14px;border-radius:10px;margin:10px 0}
+.pax{display:grid;grid-template-columns:2fr 1fr;gap:10px;margin-bottom:10px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+/* chat */
+.chatbox{display:flex;flex-direction:column;height:calc(100vh - 170px);min-height:460px;padding:0;overflow:hidden}
+#msgs{flex:1;overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:12px}
+.m{max-width:85%;padding:10px 14px;border-radius:14px;line-height:1.45;font-size:15px;word-wrap:break-word}
+.m.u{align-self:flex-end;background:var(--blue);color:#fff;border-bottom-right-radius:4px}
+.m.a{align-self:flex-start;background:#eef3fc;border-bottom-left-radius:4px}
+.m.a .flight{background:#fff;padding:10px 12px;gap:10px;margin:8px 0 0;font-size:14px}
+.m.a .flight .t{font-size:16px}.m.a .flight .price{font-size:17px}
+.pend{background:#fffbe9;border:1px solid #f2dc83;border-radius:10px;padding:10px 12px;margin-top:8px;white-space:pre-line;font-size:14px}
+.pend .row{margin-top:8px}.pend button{padding:7px 14px}
+details{margin-top:8px;font-size:13px;color:var(--mute)}
+.chips{display:flex;gap:8px;flex-wrap:wrap;padding:0 18px 10px}.chips button{font-size:13px;padding:6px 12px}
+.inbar{display:flex;gap:10px;padding:12px;border-top:1px solid var(--line)}.inbar input{flex:1}
+.dots span{display:inline-block;width:7px;height:7px;background:#8aa3d1;border-radius:50%;margin-right:4px;animation:b 1s infinite}
+.dots span:nth-child(2){animation-delay:.15s}.dots span:nth-child(3){animation-delay:.3s}
+@keyframes b{50%{transform:translateY(-5px)}}
+.big{font-size:44px}.center{text-align:center}
+@media(max-width:640px){header{padding:0 12px}nav a{margin-left:12px;font-size:13px}.hero{padding:28px 18px}.hero h1{font-size:26px}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo" onclick="show('home')">✈ Sky<b>Assist</b></div>
+  <nav>
+    <a data-v="home" onclick="show('home')">Home</a>
+    <a data-v="results" onclick="show('results')">Flights</a>
+    <a data-v="chat" onclick="show('chat')">Assistant</a>
+    <a data-v="mine" onclick="show('mine')">My Bookings</a>
+  </nav>
+</header>
+<main>
+
+<!-- Screen 1: Home -->
+<section id="home" class="view on">
+  <div class="hero">
+    <h1>Fly smarter with SkyAssist</h1>
+    <p>Search flights, book in seconds, or just ask our AI assistant.</p>
+    <form class="search" id="sform">
+      <div><label>From</label><input id="s_from" list="cities" placeholder="Delhi" required></div>
+      <div><label>To</label><input id="s_to" list="cities" placeholder="Mumbai" required></div>
+      <div><label>Date</label><input id="s_date" type="date"></div>
+      <div><label>Passengers</label><select id="s_pax"></select></div>
+      <div><label>Max price (₹)</label><input id="s_max" type="number" min="0" placeholder="Any"></div>
+      <div style="align-self:end"><button style="width:100%">Search flights</button></div>
+    </form>
+    <datalist id="cities"><option>Delhi<option>Mumbai<option>Bengaluru<option>Chennai<option>Goa<option>Lucknow<option>Kolkata<option>Hyderabad</datalist>
+    <div class="row" style="margin-top:18px"><button class="ghost" onclick="show('chat')">💬 Chat with SkyAssist</button></div>
+  </div>
+  <div class="feats">
+    <div class="card"><b>🔎 Flight search</b><span class="mute">Filter by route, date, price and seats.</span></div>
+    <div class="card"><b>🎫 Easy booking</b><span class="mute">Add passengers, see the total, get a booking ID.</span></div>
+    <div class="card"><b>📄 Policy answers</b><span class="mute">Baggage, refunds and check-in answered from airline documents.</span></div>
+    <div class="card"><b>🤖 Safe AI actions</b><span class="mute">The assistant asks you to confirm before booking or cancelling.</span></div>
+  </div>
+</section>
+
+<!-- Screen 2: Results -->
+<section id="results" class="view">
+  <h2 id="rtitle">Flights</h2>
+  <div id="rlist"><p class="mute">Use the search on the Home page.</p></div>
+</section>
+
+<!-- Booking form -->
+<section id="book" class="view">
+  <h2>Passenger details</h2>
+  <div class="card" id="bsum"></div>
+  <form id="bform" class="card" style="margin-top:14px">
+    <div id="bpax"></div>
+    <h3 style="margin:16px 0 10px">Contact</h3>
+    <div class="grid2">
+      <div><label>Contact name</label><input id="c_name" required minlength="2"></div>
+      <div><label>Email</label><input id="c_email" type="email" required></div>
+      <div><label>Phone</label><input id="c_phone"></div>
+    </div>
+    <div id="berr"></div>
+    <div class="row" style="margin-top:16px"><div class="sp mute" id="btotal"></div>
+      <button type="button" class="ghost" onclick="show('results')">Back</button><button>Confirm booking</button></div>
+  </form>
+</section>
+
+<!-- Screen 4: Confirmation -->
+<section id="confirm" class="view"><div id="cbox"></div></section>
+
+<!-- Screen 3: Chat -->
+<section id="chat" class="view">
+  <div class="card chatbox">
+    <div id="msgs"></div>
+    <div class="chips" id="chips"></div>
+    <form class="inbar" id="cform"><input id="cin" placeholder="Ask about flights, baggage, refunds, bookings..." autocomplete="off"><button id="csend">Send</button></form>
+  </div>
+</section>
+
+<!-- My bookings -->
+<section id="mine" class="view">
+  <h2>My bookings</h2>
+  <form class="card row" id="mform"><div style="width:200px"><label>Booking ID</label><input id="m_id" type="number" min="1" required></div>
+    <button style="align-self:end">Find booking</button></form>
+  <div id="mbox" style="margin-top:14px"></div>
+</section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const inr = n => "₹" + Number(n).toLocaleString("en-IN");
+const tm = iso => new Date(iso).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
+const dt = iso => new Date(iso).toLocaleDateString([], {weekday: "short", day: "numeric", month: "short", year: "numeric"});
+const dur = (a, b) => { const m = Math.round((new Date(b) - new Date(a)) / 60000); return Math.floor(m / 60) + "h " + (m % 60) + "m"; };
+const md = s => esc(s).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>");
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, {headers: {"Content-Type": "application/json"}, ...opts});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    let d = j.detail;
+    if (Array.isArray(d)) d = d.map(x => (x.loc || []).slice(-1) + ": " + x.msg).join("; ");
+    throw new Error(d || "Request failed (" + r.status + ")");
+  }
+  return j;
+}
+
+function show(v) {
+  document.querySelectorAll(".view").forEach(e => e.classList.toggle("on", e.id === v));
+  document.querySelectorAll("nav a").forEach(a => a.classList.toggle("on", a.dataset.v === v));
+  window.scrollTo(0, 0);
+  if (v === "chat" && !$("msgs").children.length) greet();
+}
+
+/* ---------- search ---------- */
+let pax = 1, selected = null;
+$("s_pax").innerHTML = [1,2,3,4,5,6].map(n => `<option value="${n}">${n} passenger${n > 1 ? "s" : ""}</option>`).join("");
+const today = new Date(); today.setDate(today.getDate() + 1);
+$("s_date").min = new Date().toISOString().slice(0, 10);
+$("s_date").value = today.toISOString().slice(0, 10);
+
+function flightCard(f, compact) {
+  const low = f.seats <= 10 ? `<span class="tag low">${f.seats} seats left</span>` : `<span class="tag">${f.seats} seats</span>`;
+  const el = document.createElement("div");
+  el.className = compact ? "flight" : "card flight";
+  el.innerHTML = `<div class="air"><b>${esc(f.airline)}</b><span class="mute">${esc(f.flight_no)}</span><br>${low}</div>
+    <div class="path"><div><div class="t">${tm(f.departure)}</div><div class="mute">${esc(f.origin)}</div></div>
+      <div class="line"></div><div class="mute">${dur(f.departure, f.arrival)}</div><div class="line"></div>
+      <div><div class="t">${tm(f.arrival)}</div><div class="mute">${esc(f.destination)}</div></div></div>
+    <div><div class="price">${inr(f.price)}</div><div class="mute">${dt(f.departure)}</div></div>`;
+  const b = document.createElement("button"); b.textContent = "Book now";
+  b.onclick = () => openBook(f, compact ? 1 : pax); el.appendChild(b);
+  return el;
+}
+
+$("sform").onsubmit = async e => {
+  e.preventDefault(); pax = +$("s_pax").value;
+  const q = new URLSearchParams({origin: $("s_from").value, destination: $("s_to").value,
+    date: $("s_date").value, max_price: $("s_max").value || 0, passengers: pax});
+  $("rtitle").textContent = `${$("s_from").value} → ${$("s_to").value}`;
+  $("rlist").innerHTML = '<p class="mute">Searching...</p>'; show("results");
+  try {
+    const list = await api("/flights?" + q);
+    $("rlist").innerHTML = "";
+    if (!list.length) $("rlist").innerHTML = '<div class="card">No flights found. Try another date or a higher price limit.</div>';
+    list.forEach(f => $("rlist").appendChild(flightCard(f)));
+  } catch (err) { $("rlist").innerHTML = `<div class="err">${esc(err.message)}</div>`; }
+};
+
+/* ---------- booking ---------- */
+function openBook(f, n) {
+  selected = f; pax = n;
+  $("bsum").innerHTML = `<b>${esc(f.airline)} ${esc(f.flight_no)}</b> · ${esc(f.origin)} → ${esc(f.destination)}<br>
+    <span class="mute">${dt(f.departure)}, ${tm(f.departure)} – ${tm(f.arrival)} · ${inr(f.price)} per passenger</span>`;
+  $("bpax").innerHTML = "";
+  for (let i = 1; i <= n; i++) $("bpax").insertAdjacentHTML("beforeend",
+    `<div class="pax"><div><label>Passenger ${i} full name</label><input class="pn" required minlength="2"></div>
+     <div><label>Age</label><input class="pa" type="number" min="0" max="120"></div></div>`);
+  $("btotal").innerHTML = `Total: <b>${inr(f.price * n)}</b> for ${n} passenger${n > 1 ? "s" : ""}`;
+  $("berr").innerHTML = ""; show("book");
+}
+$("bform").onsubmit = async e => {
+  e.preventDefault();
+  const names = [...document.querySelectorAll(".pn")], ages = [...document.querySelectorAll(".pa")];
+  const body = {flight_id: selected.id,
+    customer: {name: $("c_name").value, email: $("c_email").value, phone: $("c_phone").value},
+    passengers: names.map((n, i) => ({name: n.value, age: ages[i].value ? +ages[i].value : null}))};
+  try { renderBooking(await api("/bookings", {method: "POST", body: JSON.stringify(body)}), true); }
+  catch (err) { $("berr").innerHTML = `<div class="err">${esc(err.message)}</div>`; }
+};
+function bookingHTML(b) {
+  const f = b.flight, tagc = b.status === "CONFIRMED" ? "ok" : "bad";
+  return `<div class="row"><h2 style="margin:0">Booking #${b.id}</h2><span class="tag ${tagc}">${b.status}</span></div>
+    <p><b>${esc(f.airline)} ${esc(f.flight_no)}</b> · ${esc(f.origin)} → ${esc(f.destination)}<br>
+    <span class="mute">${dt(f.departure)}, ${tm(f.departure)} – ${tm(f.arrival)}</span></p>
+    <p><b>Passengers</b><br>${b.passengers.map(p => esc(p.name) + (p.age != null ? ` (${p.age})` : "")).join("<br>")}</p>
+    <p><b>Contact</b><br>${esc(b.customer.name)} · ${esc(b.customer.email)}</p>
+    <p><b>Seats:</b> ${b.num_seats} &nbsp; <b>Total paid:</b> ${inr(b.total_price)}</p>`;
+}
+function renderBooking(b, fresh) {
+  $("cbox").innerHTML = `<div class="card"><div class="center"><div class="big">✅</div><h2>Booking confirmed!</h2>
+    <p class="mute">Keep your booking ID <b>#${b.id}</b> to manage it later.</p></div>${bookingHTML(b)}
+    <div class="row"><button onclick="loadBooking(${b.id})">Manage booking</button><button class="ghost" onclick="show('home')">Home</button></div></div>`;
+  show("confirm");
+}
+
+/* ---------- my bookings ---------- */
+$("mform").onsubmit = e => { e.preventDefault(); loadBooking($("m_id").value); };
+async function loadBooking(id) {
+  $("m_id").value = id; show("mine");
+  try {
+    const b = await api("/bookings/" + id);
+    const edit = b.status === "CONFIRMED";
+    $("mbox").innerHTML = `<div class="card">${bookingHTML(b)}${edit ? `
+      <hr style="border:0;border-top:1px solid var(--line)"><h3>Update passenger details</h3>
+      <div id="mpax">${b.passengers.map(p => `<div class="pax"><input class="mn" value="${esc(p.name)}" minlength="2" required>
+        <input class="ma" type="number" min="0" max="120" value="${p.age ?? ""}" placeholder="Age"></div>`).join("")}</div>
+      <div id="merr"></div>
+      <div class="row"><button onclick="savePax(${b.id})">Save changes</button><button class="danger" onclick="cancelB(${b.id})">Cancel booking</button></div>` : ""}</div>`;
+  } catch (err) { $("mbox").innerHTML = `<div class="err">${esc(err.message)}</div>`; }
+}
+async function savePax(id) {
+  const n = [...document.querySelectorAll(".mn")], a = [...document.querySelectorAll(".ma")];
+  try {
+    await api("/bookings/" + id, {method: "PUT", body: JSON.stringify({passengers: n.map((x, i) => ({name: x.value, age: a[i].value ? +a[i].value : null}))})});
+    await loadBooking(id); $("mbox").insertAdjacentHTML("afterbegin", '<div class="card" style="margin-bottom:10px;color:var(--ok)">Passenger details updated ✔</div>');
+  } catch (err) { $("merr").innerHTML = `<div class="err">${esc(err.message)}</div>`; }
+}
+async function cancelB(id) {
+  try {
+    const q = await api(`/bookings/${id}/cancel-quote`);
+    if (!confirm(`${q.rule}\nYou will get back ${inr(q.refund)}.\n\nCancel this booking?`)) return;
+    const r = await api("/bookings/" + id, {method: "DELETE"});
+    await loadBooking(id);
+    $("mbox").insertAdjacentHTML("afterbegin", `<div class="card" style="margin-bottom:10px">Booking cancelled. Refund: <b>${inr(r.refund)}</b></div>`);
+  } catch (err) { $("merr").innerHTML = `<div class="err">${esc(err.message)}</div>`; }
+}
+
+/* ---------- chat ---------- */
+const sid = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2));
+function bubble(cls, html) {
+  const d = document.createElement("div"); d.className = "m " + cls; d.innerHTML = html;
+  $("msgs").appendChild(d); $("msgs").scrollTop = $("msgs").scrollHeight; return d;
+}
+function greet() {
+  bubble("a", "Hi! I'm SkyAssist ✈ I can find flights, answer policy questions and help you book or cancel. What would you like to do?");
+  $("chips").innerHTML = "";
+  ["Show flights from Delhi to Mumbai under ₹7,000", "What is the baggage allowance?", "What are the cancellation charges?"].forEach(t => {
+    const b = document.createElement("button"); b.className = "ghost"; b.textContent = t;
+    b.onclick = () => { $("cin").value = t; $("cform").requestSubmit(); }; $("chips").appendChild(b);
+  });
+}
+$("cform").onsubmit = async e => {
+  e.preventDefault();
+  const text = $("cin").value.trim(); if (!text) return;
+  $("cin").value = ""; $("chips").innerHTML = ""; $("csend").disabled = true;
+  bubble("u", esc(text));
+  const typing = bubble("a", '<span class="dots"><span></span><span></span><span></span></span>');
+  try {
+    const r = await api("/chat", {method: "POST", body: JSON.stringify({session_id: sid, message: text})});
+    typing.innerHTML = md(r.answer);
+    (r.flights || []).slice(0, 6).forEach(f => typing.appendChild(flightCard(f, true)));
+    if (r.sources && r.sources.length) typing.insertAdjacentHTML("beforeend",
+      `<details><summary>Sources</summary>${r.sources.map(s => `[${s.n}] ${esc(s.file)}${s.page != null ? " p." + (s.page + 1) : ""}`).join("<br>")}</details>`);
+    (r.pending || []).forEach(p => {
+      const box = document.createElement("div"); box.className = "pend";
+      box.innerHTML = `<b>Please review</b>\n${esc(p.summary)}`;
+      const row = document.createElement("div"); row.className = "row";
+      const yes = document.createElement("button"); yes.className = "ok"; yes.textContent = "Confirm";
+      const no = document.createElement("button"); no.className = "ghost"; no.textContent = "Decline";
+      const done = async (path) => {
+        yes.disabled = no.disabled = true;
+        try { const x = await api(path + p.id, {method: "POST"}); box.remove(); bubble("a", (x.ok ? "✅ " : "⚠️ ") + esc(x.message)); }
+        catch (err) { bubble("a", "⚠️ " + esc(err.message)); }
+      };
+      yes.onclick = () => done("/chat/confirm/"); no.onclick = () => done("/chat/decline/");
+      row.append(yes, no); box.appendChild(row); typing.appendChild(box);
+    });
+  } catch (err) { typing.innerHTML = "⚠️ " + esc(err.message); }
+  $("csend").disabled = false; $("msgs").scrollTop = $("msgs").scrollHeight; $("cin").focus();
+};
+</script>
+</body>
+</html>
