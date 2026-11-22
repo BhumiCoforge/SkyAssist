@@ -2,6 +2,8 @@
 import hashlib
 import json
 import logging
+import re
+import warnings
 from pathlib import Path
 
 from langchain_core.documents import Document
@@ -158,17 +160,55 @@ def get_retriever(k: int | None = None, min_score: float | None = None):
     )
 
 
+def retrieve_docs(question: str, k: int | None = None, min_score: float | None = None) -> list[Document]:
+    """Search the index and keep only chunks scoring at least the threshold. Every returned chunk
+    carries its score in metadata['relevance_score'] (a copy, so the stored index is not changed)."""
+    threshold = settings.rag_min_score if min_score is None else min_score
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="Relevance scores must be between 0 and 1")
+        pairs = get_store().similarity_search_with_relevance_scores(question, k=k or settings.rag_top_k)
+    return [Document(page_content=d.page_content, metadata={**d.metadata, "relevance_score": float(s)})
+            for d, s in pairs if s >= threshold]
+
+
 # ---------------------------------------------------------------- retrieval helpers
+CITATION = re.compile(r"\[(\d+)\]")
+
+
 def format_docs(docs: list[Document]) -> str:
     return "\n\n".join(
         f"[{i + 1}] ({Path(d.metadata.get('source', '')).name} / {d.metadata.get('section', 'general')}) "
         f"{d.page_content}" for i, d in enumerate(docs))
 
 
+def clean_snippet(text: str, limit: int = 220) -> str:
+    """Readable preview for the Sources box: no markdown headings, one line, cut at a word boundary."""
+    lines = [ln for ln in text.splitlines() if not ln.lstrip().startswith("#")]
+    flat = " ".join(" ".join(lines).split())
+    if len(flat) <= limit:
+        return flat
+    return flat[:limit].rsplit(" ", 1)[0] + "..."
+
+
 def sources_of(docs: list[Document]) -> list[dict]:
-    return [{"n": i + 1, "file": Path(d.metadata.get("source", "")).name,
-             "section": d.metadata.get("section"), "page": d.metadata.get("page"),
-             "snippet": d.page_content[:150]} for i, d in enumerate(docs)]
+    """One entry per retrieved chunk, numbered like the [n] markers the model writes in its answer."""
+    out = []
+    for i, d in enumerate(docs):
+        score = d.metadata.get("relevance_score")
+        out.append({"n": i + 1,
+                    "file": Path(d.metadata.get("source", "")).name,
+                    "title": d.metadata.get("title"),
+                    "section": d.metadata.get("section"),
+                    "page": d.metadata.get("page"),
+                    "score": round(float(score), 2) if score is not None else None,
+                    "snippet": clean_snippet(d.page_content)})
+    return out
+
+
+def mark_cited(answer: str, sources: list[dict]) -> list[dict]:
+    """Add cited=True/False to every source, depending on whether the answer contains its [n]."""
+    used = {int(n) for n in CITATION.findall(answer)}
+    return [{**s, "cited": s["n"] in used} for s in sources]
 
 
 NO_DOCS = "No relevant policy text was found for this question."
@@ -176,7 +216,7 @@ NO_DOCS = "No relevant policy text was found for this question."
 
 def retrieve_policy(question: str, k: int | None = None):
     """Return (numbered context text, sources list) for a policy question."""
-    docs = get_retriever(k).invoke(question)
+    docs = retrieve_docs(question, k)
     if not docs:
         return NO_DOCS, []
     return format_docs(docs), sources_of(docs)
@@ -184,8 +224,12 @@ def retrieve_policy(question: str, k: int | None = None):
 
 # ---------------------------------------------------------------- LCEL chain
 RAG_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", "You answer airline policy questions. Answer ONLY from the context. "
-               "Cite sources like [1]. If the answer is not in the context, say you don't know."),
+    ("system", "You answer airline policy questions. Use ONLY the numbered context.\n"
+               "- Put the source number in square brackets right after each fact it supports, "
+               "like: Cabin bags can weigh up to 7 kg [1].\n"
+               "- Cite only the sources you actually used.\n"
+               "- Give just the answer. Do not add closing lines such as 'feel free to ask'.\n"
+               "- If the context does not contain the answer, say you don't know and do not cite."),
     ("human", "Context:\n{context}\n\nQuestion: {question}"),
 ])
 
@@ -204,9 +248,9 @@ def build_policy_chain(llm=None, retriever=None):
 
 def answer_policy(question: str) -> dict:
     """Standalone cited answer (used by POST /rag/ask)."""
-    docs = get_retriever().invoke(question)
+    docs = retrieve_docs(question)
     if not docs:                                            # nothing relevant: skip the LLM call
         return {"answer": "I don't have information about that in the airline policy documents.",
                 "sources": []}
     answer = build_answer_chain().invoke({"docs": docs, "question": question})
-    return {"answer": answer, "sources": sources_of(docs)}
+    return {"answer": answer, "sources": mark_cited(answer, sources_of(docs))}

@@ -83,3 +83,25 @@ def test_answer_policy_skips_llm_when_nothing_relevant(docs_dir, monkeypatch):
     monkeypatch.setattr(rag, "_llm", ScriptedLLM(script=[]))     # would crash if it were called
     out = rag.answer_policy("who won the cricket world cup?")
     assert "don't have information" in out["answer"] and out["sources"] == []
+
+
+# ---------------------------------------------------------------- Step 5.2: citations
+def test_clean_snippet_removes_headings_and_cuts_at_word_boundary():
+    text = "# Baggage Policy\n## Cabin baggage\nOne cabin bag up to 7 kg with dimensions not exceeding 55 x 35 x 25 cm."
+    out = rag.clean_snippet(text, limit=40)
+    assert "#" not in out and out.endswith("...") and " " in out
+    assert rag.clean_snippet("Short text.") == "Short text."
+
+
+def test_mark_cited_flags_only_sources_used_in_the_answer():
+    sources = [{"n": 1}, {"n": 2}, {"n": 3}]
+    out = rag.mark_cited("Cabin bags: 7 kg [2]. Checked: 15 kg [1].", sources)
+    assert [s["cited"] for s in out] == [True, True, False]
+
+
+def test_retrieve_docs_attaches_score_without_changing_the_index(docs_dir):
+    rag.build_index()
+    docs = rag.retrieve_docs("One cabin bag up to 7 kg.")
+    assert docs and all("relevance_score" in d.metadata for d in docs)
+    stored = rag.get_store().docstore._dict.values()
+    assert all("relevance_score" not in d.metadata for d in stored)

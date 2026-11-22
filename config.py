@@ -1,8 +1,11 @@
 """Central settings (Phase 2: pydantic-settings instead of scattered os.getenv calls)."""
 from functools import lru_cache
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from netfix import prefer_ipv4
 
 # langchain-anthropic reads ANTHROPIC_API_KEY from the real environment, so export .env there too.
 load_dotenv()
@@ -22,6 +25,8 @@ class Settings(BaseSettings):
     llm_base_url: str = ""
     llm_api_key: str = ""
     llm_api_key_header: str = "X-API-KEY"   # header name the gateway expects the key in
+    # Some networks resolve the gateway to an IPv6 address that never answers; this skips it (see netfix.py).
+    llm_force_ipv4: bool = True
 
     # RAG
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
@@ -47,3 +52,6 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
+
+if settings.llm_base_url and settings.llm_force_ipv4:
+    prefer_ipv4(urlparse(settings.llm_base_url).hostname)

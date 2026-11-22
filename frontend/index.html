@@ -55,6 +55,14 @@ details{margin-top:8px;font-size:13px;color:var(--mute)}
 .dots span:nth-child(2){animation-delay:.15s}.dots span:nth-child(3){animation-delay:.3s}
 @keyframes b{50%{transform:translateY(-5px)}}
 .big{font-size:44px}.center{text-align:center}
+sup.cite{color:var(--blue);font-weight:700;font-size:11px;margin-left:1px}
+details.src{margin-top:10px;font-size:13px;color:var(--ink)}
+details.src>summary{cursor:pointer;font-weight:600;color:var(--blue)}
+.srcitem{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-top:6px}
+.srcitem .snip{color:var(--mute);margin-top:3px;font-size:12.5px;line-height:1.4}
+details.srcrest{margin-top:8px;color:var(--mute)}
+details.srcrest>summary{cursor:pointer;font-weight:500}
+details.srcrest .srcitem{opacity:.75}
 @media(max-width:640px){header{padding:0 12px}nav a{margin-left:12px;font-size:13px}.hero{padding:28px 18px}.hero h1{font-size:26px}}
 </style>
 </head>
@@ -147,7 +155,10 @@ const inr = n => "₹" + Number(n).toLocaleString("en-IN");
 const tm = iso => new Date(iso).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"});
 const dt = iso => new Date(iso).toLocaleDateString([], {weekday: "short", day: "numeric", month: "short", year: "numeric"});
 const dur = (a, b) => { const m = Math.round((new Date(b) - new Date(a)) / 60000); return Math.floor(m / 60) + "h " + (m % 60) + "m"; };
-const md = s => esc(s).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>");
+const md = (s, cite) => {
+  const h = esc(s).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>");
+  return cite ? h.replace(/\[(\d+)\]/g, '<sup class="cite">[$1]</sup>') : h;   // [1] becomes a small blue badge
+};
 
 async function api(path, opts = {}) {
   const r = await fetch(path, {headers: {"Content-Type": "application/json"}, ...opts});
@@ -274,6 +285,22 @@ async function cancelB(id) {
   } catch (err) { $("merr").innerHTML = `<div class="err">${esc(err.message)}</div>`; }
 }
 
+/* ---------- sources (citations) ---------- */
+function srcLine(s) {
+  const head = [`<b>[${s.n}]</b> ${esc(s.title || s.file)}`];
+  if (s.section) head.push(esc(s.section));
+  if (s.page != null) head.push("page " + (s.page + 1));
+  const score = s.score != null ? ` <span class="mute">· relevance ${Number(s.score).toFixed(2)}</span>` : "";
+  return `<div class="srcitem"><div>${head.join(" › ")}${score}</div><div class="snip">${esc(s.snippet || "")}</div></div>`;
+}
+function sourcesHTML(sources) {
+  const used = sources.filter(s => s.cited !== false), rest = sources.filter(s => s.cited === false);
+  let html = `<details class="src" open><summary>Sources${used.length ? " (" + used.length + " used)" : ""}</summary>`;
+  html += used.map(srcLine).join("");
+  if (rest.length) html += `<details class="srcrest"><summary>Also retrieved, not used (${rest.length})</summary>${rest.map(srcLine).join("")}</details>`;
+  return html + "</details>";
+}
+
 /* ---------- chat ---------- */
 const sid = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2));
 function bubble(cls, html) {
@@ -296,10 +323,9 @@ $("cform").onsubmit = async e => {
   const typing = bubble("a", '<span class="dots"><span></span><span></span><span></span></span>');
   try {
     const r = await api("/chat", {method: "POST", body: JSON.stringify({session_id: sid, message: text})});
-    typing.innerHTML = md(r.answer);
+    typing.innerHTML = md(r.answer, r.sources && r.sources.length);
     (r.flights || []).slice(0, 6).forEach(f => typing.appendChild(flightCard(f, true)));
-    if (r.sources && r.sources.length) typing.insertAdjacentHTML("beforeend",
-      `<details><summary>Sources</summary>${r.sources.map(s => `[${s.n}] ${esc(s.file)}${s.section ? " · " + esc(s.section) : ""}${s.page != null ? " p." + (s.page + 1) : ""}`).join("<br>")}</details>`);
+    if (r.sources && r.sources.length) typing.insertAdjacentHTML("beforeend", sourcesHTML(r.sources));
     (r.pending || []).forEach(p => {
       const box = document.createElement("div"); box.className = "pend";
       box.innerHTML = `<b>Please review</b>\n${esc(p.summary)}\n<span class="mute">Valid for ${Math.round((p.expires_in || 600) / 60)} minutes</span>`;
