@@ -133,7 +133,8 @@ details{margin-top:8px;font-size:13px;color:var(--mute)}
 <!-- My bookings -->
 <section id="mine" class="view">
   <h2>My bookings</h2>
-  <form class="card row" id="mform"><div style="width:200px"><label>Booking ID</label><input id="m_id" type="number" min="1" required></div>
+  <form class="card row" id="mform"><div style="width:140px"><label>Booking ID</label><input id="m_id" type="number" min="1" required></div>
+    <div style="flex:1;min-width:220px"><label>Email used for booking</label><input id="m_email" type="email" required></div>
     <button style="align-self:end">Find booking</button></form>
   <div id="mbox" style="margin-top:14px"></div>
 </section>
@@ -233,17 +234,20 @@ function bookingHTML(b) {
 }
 function renderBooking(b, fresh) {
   $("cbox").innerHTML = `<div class="card"><div class="center"><div class="big">✅</div><h2>Booking confirmed!</h2>
-    <p class="mute">Keep your booking ID <b>#${b.id}</b> to manage it later.</p></div>${bookingHTML(b)}
-    <div class="row"><button onclick="loadBooking(${b.id})">Manage booking</button><button class="ghost" onclick="show('home')">Home</button></div></div>`;
+    <p class="mute">Keep your booking ID <b>#${b.id}</b> and your email <b>${esc(b.customer.email)}</b> to manage it later.</p></div>${bookingHTML(b)}
+    <div class="row"><button onclick="loadBooking(${b.id}, '${esc(b.customer.email)}')">Manage booking</button><button class="ghost" onclick="show('home')">Home</button></div></div>`;
   show("confirm");
 }
 
 /* ---------- my bookings ---------- */
-$("mform").onsubmit = e => { e.preventDefault(); loadBooking($("m_id").value); };
-async function loadBooking(id) {
-  $("m_id").value = id; show("mine");
+let myEmail = "";
+const emailQS = () => "?email=" + encodeURIComponent(myEmail);
+$("mform").onsubmit = e => { e.preventDefault(); loadBooking($("m_id").value, $("m_email").value); };
+async function loadBooking(id, email) {
+  myEmail = (email || myEmail).trim();
+  $("m_id").value = id; $("m_email").value = myEmail; show("mine");
   try {
-    const b = await api("/bookings/" + id);
+    const b = await api("/bookings/" + id + emailQS());
     const edit = b.status === "CONFIRMED";
     $("mbox").innerHTML = `<div class="card">${bookingHTML(b)}${edit ? `
       <hr style="border:0;border-top:1px solid var(--line)"><h3>Update passenger details</h3>
@@ -256,15 +260,15 @@ async function loadBooking(id) {
 async function savePax(id) {
   const n = [...document.querySelectorAll(".mn")], a = [...document.querySelectorAll(".ma")];
   try {
-    await api("/bookings/" + id, {method: "PUT", body: JSON.stringify({passengers: n.map((x, i) => ({name: x.value, age: a[i].value ? +a[i].value : null}))})});
+    await api("/bookings/" + id + emailQS(), {method: "PUT", body: JSON.stringify({passengers: n.map((x, i) => ({name: x.value, age: a[i].value ? +a[i].value : null}))})});
     await loadBooking(id); $("mbox").insertAdjacentHTML("afterbegin", '<div class="card" style="margin-bottom:10px;color:var(--ok)">Passenger details updated ✔</div>');
   } catch (err) { $("merr").innerHTML = `<div class="err">${esc(err.message)}</div>`; }
 }
 async function cancelB(id) {
   try {
-    const q = await api(`/bookings/${id}/cancel-quote`);
+    const q = await api(`/bookings/${id}/cancel-quote` + emailQS());
     if (!confirm(`${q.rule}\nYou will get back ${inr(q.refund)}.\n\nCancel this booking?`)) return;
-    const r = await api("/bookings/" + id, {method: "DELETE"});
+    const r = await api("/bookings/" + id + emailQS(), {method: "DELETE"});
     await loadBooking(id);
     $("mbox").insertAdjacentHTML("afterbegin", `<div class="card" style="margin-bottom:10px">Booking cancelled. Refund: <b>${inr(r.refund)}</b></div>`);
   } catch (err) { $("merr").innerHTML = `<div class="err">${esc(err.message)}</div>`; }
@@ -295,16 +299,16 @@ $("cform").onsubmit = async e => {
     typing.innerHTML = md(r.answer);
     (r.flights || []).slice(0, 6).forEach(f => typing.appendChild(flightCard(f, true)));
     if (r.sources && r.sources.length) typing.insertAdjacentHTML("beforeend",
-      `<details><summary>Sources</summary>${r.sources.map(s => `[${s.n}] ${esc(s.file)}${s.page != null ? " p." + (s.page + 1) : ""}`).join("<br>")}</details>`);
+      `<details><summary>Sources</summary>${r.sources.map(s => `[${s.n}] ${esc(s.file)}${s.section ? " · " + esc(s.section) : ""}${s.page != null ? " p." + (s.page + 1) : ""}`).join("<br>")}</details>`);
     (r.pending || []).forEach(p => {
       const box = document.createElement("div"); box.className = "pend";
-      box.innerHTML = `<b>Please review</b>\n${esc(p.summary)}`;
+      box.innerHTML = `<b>Please review</b>\n${esc(p.summary)}\n<span class="mute">Valid for ${Math.round((p.expires_in || 600) / 60)} minutes</span>`;
       const row = document.createElement("div"); row.className = "row";
       const yes = document.createElement("button"); yes.className = "ok"; yes.textContent = "Confirm";
       const no = document.createElement("button"); no.className = "ghost"; no.textContent = "Decline";
       const done = async (path) => {
         yes.disabled = no.disabled = true;
-        try { const x = await api(path + p.id, {method: "POST"}); box.remove(); bubble("a", (x.ok ? "✅ " : "⚠️ ") + esc(x.message)); }
+        try { const x = await api(path + p.id, {method: "POST", body: JSON.stringify({session_id: sid})}); box.remove(); bubble("a", (x.ok ? "✅ " : "⚠️ ") + esc(x.message)); }
         catch (err) { bubble("a", "⚠️ " + esc(err.message)); }
       };
       yes.onclick = () => done("/chat/confirm/"); no.onclick = () => done("/chat/decline/");

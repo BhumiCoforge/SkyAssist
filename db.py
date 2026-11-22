@@ -1,18 +1,22 @@
-import os
+import enum
 import random
 from datetime import date, datetime, time, timedelta
 from typing import Optional
 
-from dotenv import load_dotenv
-from sqlalchemy import ForeignKey, create_engine
+from sqlalchemy import CheckConstraint, ForeignKey, Index, create_engine, func, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
-load_dotenv()
+from config import settings
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./skyassist.db")
+DATABASE_URL = settings.database_url
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 engine = create_engine(DATABASE_URL, connect_args=connect_args)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+
+
+class BookingStatus(str, enum.Enum):
+    CONFIRMED = "CONFIRMED"
+    CANCELLED = "CANCELLED"
 
 
 class Base(DeclarativeBase):
@@ -21,12 +25,17 @@ class Base(DeclarativeBase):
 
 class Flight(Base):
     __tablename__ = "flights"
+    __table_args__ = (
+        CheckConstraint("seats >= 0", name="ck_flight_seats_nonneg"),
+        CheckConstraint("price > 0", name="ck_flight_price_pos"),
+        Index("ix_flights_route_departure", "origin", "destination", "departure"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     flight_no: Mapped[str]
     airline: Mapped[str]
     origin: Mapped[str]
     destination: Mapped[str]
-    departure: Mapped[datetime]
+    departure: Mapped[datetime] = mapped_column(index=True)
     arrival: Mapped[datetime]
     price: Mapped[float]
     seats: Mapped[int] = mapped_column(default=50)
@@ -43,11 +52,11 @@ class Customer(Base):
 class Booking(Base):
     __tablename__ = "bookings"
     id: Mapped[int] = mapped_column(primary_key=True)
-    flight_id: Mapped[int] = mapped_column(ForeignKey("flights.id"))
-    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"))
+    flight_id: Mapped[int] = mapped_column(ForeignKey("flights.id"), index=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
     num_seats: Mapped[int]
     total_price: Mapped[float]
-    status: Mapped[str] = mapped_column(default="CONFIRMED")  # CONFIRMED | CANCELLED
+    status: Mapped[str] = mapped_column(default=BookingStatus.CONFIRMED.value)
     created_at: Mapped[datetime] = mapped_column(default=datetime.now)
     flight: Mapped["Flight"] = relationship()
     customer: Mapped["Customer"] = relationship()
@@ -60,6 +69,26 @@ class Passenger(Base):
     booking_id: Mapped[int] = mapped_column(ForeignKey("bookings.id"))
     name: Mapped[str]
     age: Mapped[Optional[int]] = mapped_column(default=None)
+
+
+class ChatMessage(Base):
+    """Chat memory (Phase 4: persisted so a server restart does not wipe conversations)."""
+    __tablename__ = "chat_messages"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[str] = mapped_column(index=True)
+    payload: Mapped[str]          # one LangChain message as JSON
+    created_at: Mapped[datetime] = mapped_column(default=datetime.now)
+
+
+class PendingAction(Base):
+    """A booking/cancellation the AI proposed and the customer has not confirmed yet."""
+    __tablename__ = "pending_actions"
+    id: Mapped[str] = mapped_column(primary_key=True)
+    session_id: Mapped[str] = mapped_column(index=True)
+    action: Mapped[str]           # "book" | "cancel"
+    summary: Mapped[str]
+    payload: Mapped[str]          # JSON with the arguments to run on confirm
+    created_at: Mapped[datetime] = mapped_column(default=datetime.now)
 
 
 def get_db():
@@ -82,16 +111,21 @@ AIRLINES = [("SkyAir", "SA"), ("BlueJet", "BJ"), ("Sunwing", "SW")]
 SLOTS = [(6, 30, 0.9), (11, 15, 1.0), (16, 45, 1.1), (20, 30, 1.25)]
 
 
-def seed(days: int = 45):
-    """Create sample flights for the next `days` days if the table is empty."""
+def seed(days: Optional[int] = None) -> int:
+    """Make sure sample flights exist for the next `days` days. Safe to call on every start:
+    it only adds the missing days, so the site never runs out of flights. Returns rows added."""
+    days = days or settings.seed_days
     with SessionLocal() as db:
-        if db.query(Flight).count():
-            return
-        rnd = random.Random(42)
-        rows, n = [], 0
+        last = db.scalar(select(func.max(Flight.departure)))
+        first_day = 0 if last is None else max((last.date() - date.today()).days + 1, 0)
+        if first_day >= days:
+            return 0
+        rnd = random.Random(first_day)
+        count = db.scalar(select(func.count(Flight.id))) or 0
+        rows, n = [], count
         for o, d, base, mins in ROUTES:
             for a, b in ((o, d), (d, o)):
-                for day in range(days):
+                for day in range(first_day, days):
                     for i, (h, m, mult) in enumerate(SLOTS):
                         n += 1
                         name, code = AIRLINES[(n + i) % 3]
@@ -103,3 +137,4 @@ def seed(days: int = 45):
                             price=price, seats=rnd.randint(8, 60)))
         db.add_all(rows)
         db.commit()
+        return len(rows)
