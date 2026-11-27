@@ -148,7 +148,7 @@ details.srcrest .srcitem{opacity:.75}
 </section>
 </main>
 
-<script>
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>\n<script>
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const inr = n => "₹" + Number(n).toLocaleString("en-IN");
@@ -161,7 +161,7 @@ const md = (s, cite) => {
 };
 
 async function api(path, opts = {}) {
-  const r = await fetch(path, {headers: {"Content-Type": "application/json"}, ...opts});
+  const r = await fetch(path, {...opts, headers: {"Content-Type": "application/json", ...(opts.headers || {})}});
   const j = await r.json().catch(() => ({}));
   if (!r.ok) {
     let d = j.detail;
@@ -231,9 +231,123 @@ $("bform").onsubmit = async e => {
   const body = {flight_id: selected.id,
     customer: {name: $("c_name").value, email: $("c_email").value, phone: $("c_phone").value},
     passengers: names.map((n, i) => ({name: n.value, age: ages[i].value ? +ages[i].value : null}))};
-  try { renderBooking(await api("/bookings", {method: "POST", body: JSON.stringify(body)}), true); }
-  catch (err) { $("berr").innerHTML = `<div class="err">${esc(err.message)}</div>`; }
+  window.lastPaymentOrder = null;
+  try {
+    const order = await api("/bookings", {method: "POST", headers: {"Idempotency-Key": crypto.randomUUID()}, body: JSON.stringify(body)});
+    window.lastPaymentOrder = order;
+    await startPayment(order);
+  } catch (err) { $("berr").innerHTML = `<div class="err">${esc(err.message)}${window.lastPaymentOrder ? ` <button type="button" onclick="retryLastPayment()">Retry payment</button>` : ""}</div>`; }
 };
+async function retryLastPayment() {
+  try { await startPayment(window.lastPaymentOrder); }
+  catch (err) { $("berr").innerHTML = `<div class="err">${esc(err.message)} <button type="button" onclick="retryLastPayment()">Retry payment</button></div>`; }
+}
+
+function showDemoCheckout(order, chatMode=false) {
+  return new Promise((resolve, reject) => {
+    const existing = document.getElementById("demo-payment-modal");
+    if (existing) existing.remove();
+
+    const modal = document.createElement("div");
+    modal.id = "demo-payment-modal";
+    modal.style.cssText = "position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;padding:18px;";
+    modal.innerHTML = `
+      <div style="background:var(--card,#fff);color:var(--text,#222);border-radius:18px;padding:24px;width:min(420px,100%);box-shadow:0 20px 60px rgba(0,0,0,.3);">
+        <h2 style="margin:0 0 8px;">SkyAssist Demo Checkout</h2>
+        <p style="margin:0 0 6px;opacity:.8;">Test payment ? no real money will be charged.</p>
+        <p style="font-size:26px;font-weight:700;margin:18px 0;">?${Number(order.amount).toLocaleString("en-IN")}</p>
+        <p style="font-size:13px;opacity:.7;">Booking #${order.booking_id}</p>
+        <div style="display:grid;gap:10px;margin-top:20px;">
+          <button id="demo-pay-success" style="padding:13px;border:0;border-radius:10px;background:#16803c;color:white;font-weight:700;cursor:pointer;">Simulate Successful Payment</button>
+          <button id="demo-pay-failure" style="padding:13px;border:0;border-radius:10px;background:#b83232;color:white;font-weight:700;cursor:pointer;">Simulate Failed Payment</button>
+          <button id="demo-pay-cancel" style="padding:12px;border:1px solid #888;border-radius:10px;background:transparent;color:inherit;cursor:pointer;">Cancel / Close</button>
+        </div>
+        <p style="font-size:12px;opacity:.65;margin-top:15px;">Demo mode is enabled for local development.</p>
+      </div>`;
+    document.body.appendChild(modal);
+
+    const close = () => modal.remove();
+    const disableButtons = () => {
+      modal.querySelectorAll("button").forEach(b => b.disabled = true);
+    };
+
+    modal.querySelector("#demo-pay-cancel").onclick = () => {
+      close();
+      reject(new Error("Checkout cancelled. Booking remains pending; you can retry payment."));
+    };
+
+    async function process(outcome) {
+      disableButtons();
+      const chosen = modal.querySelector(outcome === "success" ? "#demo-pay-success" : "#demo-pay-failure");
+      if (chosen) chosen.textContent = "Processing...";
+      try {
+        const result = await api(`/bookings/${order.booking_id}/payment/demo`, {
+          method: "POST",
+          body: JSON.stringify({
+            email: order.customer.email,
+            payment_order_id: order.payment_order_id,
+            outcome
+          })
+        });
+        close();
+
+        if (outcome === "failure" || !result.ok) {
+          reject(new Error(result.message || "Demo payment failed. Please retry."));
+          return;
+        }
+
+        if (chatMode) {
+          bubble("a", `Demo payment successful. Booking #${result.booking.id} is confirmed.`);
+        }
+        renderBooking(result.booking, true);
+        resolve(result);
+      } catch (err) {
+        close();
+        reject(err);
+      }
+    }
+
+    modal.querySelector("#demo-pay-success").onclick = () => process("success");
+    modal.querySelector("#demo-pay-failure").onclick = () => process("failure");
+  });
+}
+
+async function startPayment(order, chatMode=false) {
+  if (order.provider === "demo") return showDemoCheckout(order, chatMode);
+  if (!window.Razorpay) throw new Error("Razorpay Checkout could not be loaded. Please check your internet connection.");
+  return new Promise((resolve, reject) => {
+    const options = {
+      key: order.key_id, amount: order.amount_paise, currency: order.currency,
+      name: "SkyAssist", description: "Flight booking payment",
+      order_id: order.payment_order_id,
+      prefill: {name: order.customer.name, email: order.customer.email, contact: order.customer.phone || ""},
+      notes: {booking_id: String(order.booking_id)},
+      handler: async function(response) {
+        try {
+          const verified = await api(`/bookings/${order.booking_id}/payment/verify`, {
+            method: "POST", body: JSON.stringify({email: order.customer.email,
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature})
+          });
+          if (chatMode) bubble("a", `✅ Payment verified. Booking #${verified.booking.id} is confirmed. Total ₹${verified.booking.total_price.toLocaleString("en-IN")}.`);
+          renderBooking(verified.booking, true);
+          resolve(verified);
+        } catch(err) { reject(err); }
+      },
+      modal: {ondismiss: function() { reject(new Error("Payment checkout was closed. Booking remains pending until expiry.")); }}
+    };
+    const checkout = new Razorpay(options);
+    checkout.on("payment.failed", async function(response) {
+      const failure = response.error || {};
+      try { await api(`/bookings/${order.booking_id}/payment/failure`, {method: "POST",
+        body: JSON.stringify({email: order.customer.email, razorpay_payment_id: failure.metadata?.payment_id,
+          error_code: failure.code, error_description: failure.description})}); } catch (_) {}
+      reject(new Error(failure.description || "Payment failed. Please try again."));
+    });
+    checkout.open();
+  });
+}
 function bookingHTML(b) {
   const f = b.flight, tagc = b.status === "CONFIRMED" ? "ok" : "bad";
   return `<div class="row"><h2 style="margin:0">Booking #${b.id}</h2><span class="tag ${tagc}">${b.status}</span></div>
@@ -241,7 +355,7 @@ function bookingHTML(b) {
     <span class="mute">${dt(f.departure)}, ${tm(f.departure)} – ${tm(f.arrival)}</span></p>
     <p><b>Passengers</b><br>${b.passengers.map(p => esc(p.name) + (p.age != null ? ` (${p.age})` : "")).join("<br>")}</p>
     <p><b>Contact</b><br>${esc(b.customer.name)} · ${esc(b.customer.email)}</p>
-    <p><b>Seats:</b> ${b.num_seats} &nbsp; <b>Total paid:</b> ${inr(b.total_price)}</p>`;
+    <p><b>Seats:</b> ${b.num_seats} &nbsp; <b>Total fare:</b> ${inr(b.total_price)}</p>`;
 }
 function renderBooking(b, fresh) {
   $("cbox").innerHTML = `<div class="card"><div class="center"><div class="big">✅</div><h2>Booking confirmed!</h2>
@@ -281,7 +395,7 @@ async function cancelB(id) {
     if (!confirm(`${q.rule}\nYou will get back ${inr(q.refund)}.\n\nCancel this booking?`)) return;
     const r = await api("/bookings/" + id + emailQS(), {method: "DELETE"});
     await loadBooking(id);
-    $("mbox").insertAdjacentHTML("afterbegin", `<div class="card" style="margin-bottom:10px">Booking cancelled. Refund: <b>${inr(r.refund)}</b></div>`);
+    $("mbox").insertAdjacentHTML("afterbegin", `<div class="card" style="margin-bottom:10px">Booking cancelled. Refund amount: <b>${inr(r.refund)}</b> · Gateway status: <b>${esc(r.refund_status || "NOT_ELIGIBLE")}</b></div>`);
   } catch (err) { $("merr").innerHTML = `<div class="err">${esc(err.message)}</div>`; }
 }
 
@@ -334,8 +448,19 @@ $("cform").onsubmit = async e => {
       const no = document.createElement("button"); no.className = "ghost"; no.textContent = "Decline";
       const done = async (path) => {
         yes.disabled = no.disabled = true;
-        try { const x = await api(path + p.id, {method: "POST", body: JSON.stringify({session_id: sid})}); box.remove(); bubble("a", (x.ok ? "✅ " : "⚠️ ") + esc(x.message)); }
-        catch (err) { bubble("a", "⚠️ " + esc(err.message)); }
+        let paymentOrder = null;
+        try {
+          const x = await api(path + p.id, {method: "POST", body: JSON.stringify({session_id: sid})});
+          box.remove();
+          bubble("a", (x.ok ? "✅ " : "⚠️ ") + esc(x.message));
+          paymentOrder = x.payment || null;
+          if (paymentOrder) await startPayment(paymentOrder, true);
+        }
+        catch (err) {
+          const retry = paymentOrder ? ` <button type="button" onclick="startPayment(window.chatRetryOrder,true)">Retry checkout</button>` : "";
+          if (paymentOrder) window.chatRetryOrder = paymentOrder;
+          bubble("a", "⚠️ " + esc(err.message) + retry);
+        }
       };
       yes.onclick = () => done("/chat/confirm/"); no.onclick = () => done("/chat/decline/");
       row.append(yes, no); box.appendChild(row); typing.appendChild(box);
