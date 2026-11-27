@@ -100,3 +100,28 @@ class CancelOut(RefundQuote):
 
 class MessageOut(BaseModel):
     message: str
+
+class PaymentVerifyIn(BaseModel):
+    email: EmailStr
+    razorpay_order_id: str = Field(min_length=5, max_length=100)
+    razorpay_payment_id: str = Field(min_length=5, max_length=100)
+    razorpay_signature: str = Field(min_length=20, max_length=200)
+
+
+class PaymentVerifyOut(BaseModel):
+    ok: bool
+    booking: BookingOut
+    payment_status: str
+
+
+class PaymentFailureIn(BaseModel):
+    email: EmailStr
+    razorpay_payment_id: Optional[str] = Field(default=None, max_length=100)
+    error_code: Optional[str] = Field(default=None, max_length=80)
+    error_description: Optional[str] = Field(default=None, max_length=300)
+
+
+class DemoPaymentIn(BaseModel):
+    email: EmailStr
+    payment_order_id: str = Field(min_length=5, max_length=100)
+    outcome: str = Field(pattern=r"^(success|failure)$")

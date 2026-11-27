@@ -15,6 +15,8 @@ SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 
 class BookingStatus(str, enum.Enum):
+    PENDING_PAYMENT = "PENDING_PAYMENT"
+    CANCEL_PENDING = "CANCEL_PENDING"
     CONFIRMED = "CONFIRMED"
     CANCELLED = "CANCELLED"
 
@@ -58,6 +60,8 @@ class Booking(Base):
     total_price: Mapped[float]
     status: Mapped[str] = mapped_column(default=BookingStatus.CONFIRMED.value)
     created_at: Mapped[datetime] = mapped_column(default=datetime.now)
+    payment_expires_at: Mapped[Optional[datetime]] = mapped_column(default=None, index=True)
+    idempotency_key: Mapped[Optional[str]] = mapped_column(default=None, unique=True, index=True)
     flight: Mapped["Flight"] = relationship()
     customer: Mapped["Customer"] = relationship()
     passengers: Mapped[list["Passenger"]] = relationship(cascade="all, delete-orphan")
@@ -69,6 +73,36 @@ class Passenger(Base):
     booking_id: Mapped[int] = mapped_column(ForeignKey("bookings.id"))
     name: Mapped[str]
     age: Mapped[Optional[int]] = mapped_column(default=None)
+
+
+
+
+class Payment(Base):
+    __tablename__ = "payments"
+    __table_args__ = (Index("ix_payment_booking_status", "booking_id", "status"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    booking_id: Mapped[int] = mapped_column(ForeignKey("bookings.id"), index=True)
+    gateway: Mapped[str] = mapped_column(default="razorpay")
+    order_id: Mapped[str] = mapped_column(unique=True, index=True)
+    payment_id: Mapped[Optional[str]] = mapped_column(default=None, unique=True)
+    amount: Mapped[float]
+    currency: Mapped[str] = mapped_column(default="INR")
+    status: Mapped[str] = mapped_column(default="CREATED", index=True)
+    signature: Mapped[Optional[str]] = mapped_column(default=None)
+    created_at: Mapped[datetime] = mapped_column(default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(default=datetime.now, onupdate=datetime.now)
+    booking: Mapped["Booking"] = relationship()
+
+
+class Refund(Base):
+    __tablename__ = "refunds"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    payment_id: Mapped[int] = mapped_column(ForeignKey("payments.id"), index=True)
+    gateway_refund_id: Mapped[Optional[str]] = mapped_column(default=None, unique=True)
+    amount: Mapped[float]
+    status: Mapped[str] = mapped_column(default="REQUESTED")
+    created_at: Mapped[datetime] = mapped_column(default=datetime.now)
+    payment: Mapped["Payment"] = relationship()
 
 
 class ChatMessage(Base):

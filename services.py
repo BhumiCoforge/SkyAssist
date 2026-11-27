@@ -146,6 +146,8 @@ def get_owned_booking(db: Session, booking_id: int, email: str) -> Booking:
 
 def refund_quote(b: Booking) -> dict:
     hours = (b.flight.departure - datetime.now()).total_seconds() / 3600
+    if b.status == BookingStatus.PENDING_PAYMENT.value:
+        return dict(refund=0, rule="Payment not completed; no refund is due")
     if b.status == BookingStatus.CANCELLED.value:
         return dict(refund=0, rule="Already cancelled")
     if hours <= 0:

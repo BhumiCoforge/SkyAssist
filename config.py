@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     # Protects flight create/update/delete and /rag/rebuild. Empty = those endpoints are disabled.
     admin_api_key: str = ""
 
+    # Razorpay (TEST MODE only for local implementation)
+    razorpay_key_id: str = ""
+    razorpay_key_secret: str = ""
+    payment_order_ttl_minutes: int = 15
+    payment_provider: str = "demo"
+
 
 @lru_cache
 def get_settings() -> Settings:
